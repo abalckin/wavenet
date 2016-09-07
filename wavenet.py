@@ -37,10 +37,11 @@ class Wavenet():
         """
         self.wt = wavelet
         self.param = {}
-        self.param['p'] = np.zeros(ncount)+self.wt.pinit
+        self.param['p'] = np.zeros(ncount)
         self.deltax = np.max(x)-np.min(x)
+        countx = (np.max(x)-np.min(x))         
         deltay = np.max(y)-np.min(y)
-        self.param['b'] = np.arange(np.min(x), np.max(x), self.deltax/ncount)
+        self.param['b'] = np.linspace(np.min(x)-countx/2, np.max(x)+countx/2, num=ncount)
         #self.param['b'] = np.random.random(ncount)
         self.param['c'] = np.zeros(1) + y[0]
         #self.param['c']= np.random.random(1)+y[0]
@@ -50,7 +51,7 @@ class Wavenet():
         self.step = np.vectorize(self._step, cache=True)
         self.xcount = x.shape[-1]
         self.param['a'] = np.zeros(ncount)+1
-        self.param['w'] = np.zeros(ncount)+1
+        self.param['w'] = np.zeros(ncount)
 
     
     def sim(self, t):
@@ -78,10 +79,10 @@ class Wavenet():
         tau = self._tau(t)
         return np.sum(self.wt.wavelet(self.param['p'], tau)*self.param['w'])
 
-    def smart_train(self, input, target):
+    def smart_train(self, input, target, maxiter):
         f = Func(self, input, target)
         x0 = self.pack(self.param)
-        res1 = opt.fmin_cg(f, x0, fprime=f.derivative, maxiter=100)
+        res1 = opt.fmin_bfgs(f, x0, fprime=f.derivative, maxiter=maxiter)
         return res1
 
     def pack(self, param):

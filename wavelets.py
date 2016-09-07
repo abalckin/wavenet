@@ -18,13 +18,6 @@ class Wavelet:
 
 
 class Morlet(Wavelet):
-    rp = 500
-    ra = 50
-    rb = 5
-    rw = 5000
-    rc = 500
-    rate = {'a': ra, 'b': rb, 'c': rc, 'w': rw, 'p': rp}
-    pinit = np.pi/100
     def wavelet(p, tau):
         return np.cos(p*tau)*np.exp(-0.5*tau**2)
 
