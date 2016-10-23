@@ -1,24 +1,7 @@
 import numpy as np
-import copy
-#import scipy_mod.optimize as opt
 import scipy.optimize as opt
-class Func(object):
-    """ Decorator that caches the value gradient of function each time it
-    is called. """
-    def __init__(self, net, input, target):
-        self.net = net
-        self.input = input
-        self.target = target
-
-    def __call__(self, x, *args):
-        self.net.param = self.net.unpack(x)
-        return self.net.energy(self.input, self.target)
-
-    def derivative(self, x, *args):
-        self.net.param = self.net.unpack(x)
-        gr = self.net.antigradient(self.input, self.target, extend=True)
-        #import pdb;pdb.set_trace()
-        return self.net.pack(gr)
+from wavelets import Morlet
+import pylab as plb
 
 
 class Wavenet():
@@ -37,22 +20,32 @@ class Wavenet():
         """
         self.wt = wavelet
         self.param = {}
-        self.param['p'] = np.zeros(ncount)
+        self.param['p'] = np.ones(ncount)*5
         self.deltax = np.max(x)-np.min(x)
         countx = (np.max(x)-np.min(x))         
         deltay = np.max(y)-np.min(y)
-        self.param['b'] = np.linspace(np.min(x)-countx/2, np.max(x)+countx/2, num=ncount)
+        self.param['b'] = np.ones(ncount)*(np.max(x)+np.min(x))*0.5
         #self.param['b'] = np.random.random(ncount)
-        self.param['c'] = np.zeros(1) + y[0]
+        self.param['c'] = np.zeros(1) + np.mean(y)
+        self.param['d'] = np.zeros(1)
         #self.param['c']= np.random.random(1)+y[0]
         self.ncount = ncount
         self.tau = np.vectorize(self._tau, cache=True)
         self.h = np.vectorize(self.wt.wavelet, cache=True)
         self.step = np.vectorize(self._step, cache=True)
         self.xcount = x.shape[-1]
-        self.param['a'] = np.zeros(ncount)+1
+        self.param['a'] = np.ones(ncount)*(np.max(x)-np.min(x))*0.2
         self.param['w'] = np.zeros(ncount)
 
+    def __call__(self, x, *args):
+        self.param = self.unpack(x)
+        return self.energy(self.input, self.target)
+
+    def derivative(self, x, *args):
+        self.param = self.unpack(x)
+        gr = self.antigradient(self.input, self.target)
+        #import pdb;pdb.set_trace()
+        return self.pack(gr)
     
     def sim(self, t):
         """Simulate network
@@ -64,7 +57,7 @@ class Wavenet():
         array: Net output
         """
         #t = (t-self.d)*self.k
-        return self.step(t)*t+self.param['c']
+        return self.step(t)+self.param['c']
 
     def _step(self, t):
         """
@@ -76,33 +69,32 @@ class Wavenet():
         Return:
         double: x Net resulst
         """
-        tau = self._tau(t)
-        return np.sum(self.wt.wavelet(self.param['p'], tau)*self.param['w'])
+        tau =(t-self.param['b'])/self.param['a']
+        return np.sum(self.wt.wavelet(self.param['p'], tau)*self.param['w'])+t*self.param['d']
 
-    def smart_train(self, input, target, maxiter):
-        f = Func(self, input, target)
+    def train(self, input, target, maxiter):
         x0 = self.pack(self.param)
-        res1 = opt.fmin_bfgs(f, x0, fprime=f.derivative, maxiter=maxiter)
+        self.input=input
+        self.target=target
+        res1 = opt.fmin_bfgs(self, x0, fprime=self.derivative, maxiter=maxiter)
         return res1
 
     def pack(self, param):
         x = np.array([])
         for k in self.param.keys():
-#            import pdb; pdb.set_trace()
             x = np.append(x, param[k])
         return np.array(x)
 
     def unpack(self, aparam):
         inx = 0
         p = {}
-        #import pdb; pdb.set_trace()
         for k in self.param.keys():
             l = self.param[k].shape[-1]
             p[k] = aparam[inx:inx+l]
             inx += l
         return p
         
-    def train(self, input, target, error, extend=False, epoch=None):
+    def _train(self, input, target, error, extend=False, epoch=None):
         """Train network
         Args:
         input: array: Input signal
@@ -146,31 +138,7 @@ class Wavenet():
             self.try_dzeta(delta, input, target, extend=extend)
 
 
-    def try_dzeta(self, delta, input, target, extend=False):
-        low = copy.deepcopy(self.param)
-        hight = copy.deepcopy(self.param)
-        low_r = self.rinx/self.dzeta**2
-        hig_r = self.rinx*self.dzeta
-        for p  in low.keys():
-            low[p] += -delta[p]*self.wt.rate[p]*low_r
-            hight[p] += -delta[p]*self.wt.rate[p]*hig_r
-        self.param = low
-        err_low = self.energy(input, target)
-        self.param = hight
-        if extend:
-            self.rinx = hig_r
-        err_hig = self.energy(input, target)
-        if err_hig > err_low:
-            self.param = low
-            if extend:
-                self.rinx = low_r
-            ## self.a += -da*self.wt.ra*self.rinx
-            ## self.b += -db*self.wt.rb*self.rinx
-            ## self.w += -dw*self.wt.rw*self.rinx
-            ## #import pdb; pdb.set_trace()
-            ## self.p += -dp*self.wt.rp*self.rinx
-            ## self.a = np.clip(self.a, 1e-3, np.Inf)
-            ## self.c += -dc*self.wt.rc*self.rinx
+
     def error(self, input, target):
         """Error function
 
@@ -193,7 +161,7 @@ class Wavenet():
         Return:
         array: Energy of error
         """
-        return np.sum(self.error(input, target)**2/2)
+        return np.sum(self.error(input, target)**2)/2
 
     def _tau(self, t, k=None):
         """
@@ -210,7 +178,7 @@ class Wavenet():
         else:
             return (t-self.param['b'][k])/self.param['a'][k]
 
-    def antigradient(self, input, target, extend=False):
+    def antigradient(self, input, target):
         """
         Return:
         da:antigradient by scales
@@ -226,40 +194,31 @@ class Wavenet():
         p = self.param['p']
         w = self.param['w']
         for k in range(self.ncount):
-            tau = self.tau(input, k)
+            tau = (input-self.param['b'][k])/self.param['a'][k]
             h_tau = self.h(p[k], tau)
-            dw[k] = -np.sum(e*h_tau*input)
-            d = e*input*w[k]*self.wt._dh_db(p[k], tau, h_tau, a[k])
+            dw[k] = -np.sum(e*h_tau)
+            d = e*w[k]*self.wt._dh_db(p[k], tau, h_tau, a[k])
             db[k] = -np.sum(d)
             da[k] = -np.sum(d*tau)
-            if extend:
-                dp[k] = -np.sum(e*input*w[k]*self.wt._dh_dp(p[k], tau, h_tau, a[k]))
-            else:
-                dp[k] = 0.
-        if extend:
-            dc = -np.sum(e)
-        else:
-            dc = 0.
-        #da = np.clip(da, -1, 1)    
-        #db = np.clip(db, 0, 0)
-        ## dw = np.clip(dw, -1, 1)
-        ## dp = np.clip(dp, -1, 1)
-        ## dc = np.clip(dc, -10, 10)
-        return {'a': da, 'b': db, 'w': dw, 'p': dp, 'c': dc}
+            dp[k] = -np.sum(e*w[k]*self.wt._dh_dp(p[k], tau, h_tau, a[k]))
+        dc = -np.sum(e)
+        dd = -np.sum(e*input)
+        return {'a': da, 'b': db, 'w': dw, 'p': dp, 'c': dc, 'd':dd}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def test_func(x):
+        if x < -2:
+            return -2.186*x-12.846-2
+        elif -2 <= x < 0:
+            return 4.246*x-2
+        elif 0 <= x:            
+            return 10*np.exp(-.05*x - 0.5)*np.sin((0.3*x + 0.7)*x)-2
+        
+if __name__ == "__main__":
+    t = np.linspace(-10, 10, num=100)
+    target = np.vectorize(test_func)(t)
+    wn = Wavenet(Morlet, 30, t, target)
+    wn.train(t, target, maxiter=300)
+    plb.plot(t, target, label='Сигнал')
+    plb.plot(t, wn.sim(t), label='Аппроксимация')
+    plb.show()
